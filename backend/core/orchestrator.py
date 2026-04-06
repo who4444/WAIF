@@ -6,6 +6,7 @@ import asyncio
 from core.llm_client import llm_complete, llm_stream
 from scholar import scholar_respond
 from assistant import executive_respond
+from core.persona import persona_stream, persona_respond
 
 
 
@@ -68,13 +69,12 @@ async def scholar_node(state: AgentState) -> AgentState:
 #     }
 
 
-async def scholar_node(state: AgentState) -> AgentState:
+async def assistant_node(state: AgentState) -> AgentState:
     last = state["messages"][-1].content
-    response = await scholar_respond(last)
+    response = await executive_respond(last)
     return { **state, "speech_text": response, "done": True }
 
 
-from core.persona import persona_stream, persona_respond
 
 async def persona_node(state: AgentState) -> AgentState:
     print("[persona] handling conversation")
@@ -97,8 +97,8 @@ def build_graph():
     # nodes
     graph.add_node("classify", classify_intent)
     graph.add_node("scholar", scholar_node)
-    graph.add_node("engineer", engineer_node)
-    graph.add_node("executive", executive_node)
+    # graph.add_node("engineer", engineer_node)
+    graph.add_node("executive", assistant_node)
     graph.add_node("persona", persona_node)
 
     # entry

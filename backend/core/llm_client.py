@@ -1,54 +1,64 @@
-import anthropic
+from openai import OpenAI
 import openai
-from config import ANTHROPIC_API_KEY, DEEPSEEK_API_KEY
+from config import OPENROUTER_API_KEY, DEEPSEEK_API_KEY
 from typing import AsyncGenerator
 
 # ─── Clients ──────────────────────────────────────────────────────────────────
 
-claude_client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
 
+client = OpenAI(
+  base_url="https://openrouter.ai/api/v1",
+  api_key= OPENROUTER_API_KEY,
+)
 deepseek_client = openai.AsyncOpenAI(
     api_key=DEEPSEEK_API_KEY,
     base_url="https://api.deepseek.com/v1",
 )
 
 
-# ─── Claude — persona / speech ────────────────────────────────────────────────
+# ─── Qwen — persona / speech ────────────────────────────────────────────────
 
-async def claude_complete(
+async def qwen_complete(
     messages: list[dict],
     system: str = "",
     max_tokens: int = 512,
 ) -> str:
     try:
-        response = await claude_client.messages.create(
-            model="claude-sonnet-4-5",
+        response = await client.chat.create(
+            model="qwen/qwen-3.6-plus",
             max_tokens=max_tokens,
             system=system,
             messages=messages,
         )
-        return response.content[0].text
+        return response.choices[0].message.content
     except Exception as e:
-        print(f"[claude] error: {e}")
+        print(f"[qwen] error: {e}")
         return "sorry, something went wrong~"
 
 
-async def claude_stream(
+async def qwen_stream(
     messages: list[dict],
     system: str = "",
     max_tokens: int = 512,
 ) -> AsyncGenerator[str, None]:
     try:
-        async with claude_client.messages.stream(
-            model="claude-sonnet-4-5",
+        full_messages = []
+        if system:
+            full_messages.append({ "role": "system", "content": system })
+        full_messages.extend(messages)
+
+        stream = await client.chat.completions.create(
+            model="qwen/qwen-3.6-plus",
             max_tokens=max_tokens,
-            system=system,
-            messages=messages,
-        ) as stream:
-            async for text in stream.text_stream:
-                yield text
+            messages=full_messages,
+            stream=True,
+        )
+        async for chunk in stream:
+            delta = chunk.choices[0].delta.content
+            if delta:
+                yield delta
     except Exception as e:
-        print(f"[claude stream] error: {e}")
+        print(f"[qwen stream] error: {e}")
         yield "sorry, something went wrong~"
 
 
@@ -73,9 +83,9 @@ async def deepseek_complete(
         return response.choices[0].message.content
     except Exception as e:
         print(f"[deepseek] error: {e}")
-        # fallback to claude
-        print("[deepseek] falling back to claude")
-        return await claude_complete(messages, system, max_tokens)
+        # fallback to qwen
+        print("[deepseek] falling back to qwen")
+        return await qwen_complete(messages, system, max_tokens)
 
 
 async def deepseek_stream(
@@ -101,7 +111,7 @@ async def deepseek_stream(
                 yield delta
     except Exception as e:
         print(f"[deepseek stream] error: {e}")
-        async for text in claude_stream(messages, system, max_tokens):
+        async for text in qwen_stream(messages, system, max_tokens):
             yield text
 
 
@@ -116,7 +126,7 @@ async def llm_complete(
     if mode == "reasoning":
         return await deepseek_complete(messages, system, max_tokens)
     else:
-        return await claude_complete(messages, system, max_tokens)
+        return await qwen_complete(messages, system, max_tokens)
 
 
 async def llm_stream(
@@ -129,5 +139,5 @@ async def llm_stream(
         async for chunk in deepseek_stream(messages, system, max_tokens):
             yield chunk
     else:
-        async for chunk in claude_stream(messages, system, max_tokens):
+        async for chunk in qwen_stream(messages, system, max_tokens):
             yield chunk

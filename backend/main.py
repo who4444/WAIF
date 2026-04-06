@@ -9,7 +9,7 @@ from core.orchestrator import handle_message
 from config import *
 from core.llm_client import llm_stream
 from core.persona import persona_stream, get_greeting, get_focus_enter, get_focus_exit
-
+from perception.manager import SensesManager
 app = FastAPI()
 
 app.add_middleware(
@@ -188,3 +188,60 @@ async def send_event(event: EventBody):
 async def speak(text: str, audio_url: str = ""):
     await manager.emit_speech(text, audio_url)
     return { "ok": True }
+
+
+senses: SensesManager = None
+@app.on_event("startup")
+async def startup():
+    global senses
+    asyncio.create_task(heartbeat())
+    asyncio.create_task(startup_greeting())
+
+    loop = asyncio.get_event_loop()
+
+    senses = SensesManager(
+        on_wake=handle_wake,
+        on_transcription=handle_transcription,
+        on_app_change=handle_app_change,
+    )
+    senses.start(loop)
+    print("[backend] started")
+
+
+async def handle_wake():
+    print("[senses] wake detected")
+    await manager.emit({ "type": "WAKE" })
+
+
+async def handle_transcription(text: str):
+    print(f"[senses] transcription: {text}")
+    context = senses.get_context() if senses else {}
+
+    await manager.emit({ "type": "TASK_START" })
+
+    full_text = ""
+    async for chunk in persona_stream(text, context):
+        full_text += chunk
+        await manager.emit({
+            "type": "SPEECH_CHUNK",
+            "chunk": chunk,
+            "text": full_text,
+        })
+
+    audio_url = await generate_tts(full_text)
+    await manager.emit_speech(full_text, audio_url)
+
+
+async def handle_app_change(app_name: str):
+    print(f"[senses] app changed: {app_name}")
+    await manager.emit({
+        "type": "HUD_UPDATE",
+        "active_app": app_name,
+    })
+
+    # auto focus dim when certain apps are active
+    focus_apps = ["code", "cursor", "vim", "nvim", "pycharm", "webstorm"]
+    if any(f in app_name.lower() for f in focus_apps):
+        await manager.emit({ "type": "FOCUS_MODE" })
+    else:
+        await manager.emit({ "type": "FOCUS_END" })
