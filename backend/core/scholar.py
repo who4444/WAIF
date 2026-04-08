@@ -59,9 +59,19 @@ async def fetch_page(url: str) -> str:
 
 # ─── Synthesize ───────────────────────────────────────────────────────────────
 
-SCHOLAR_SYSTEM = """You are a research assistant. Synthesize the provided sources into a
-clear, accurate summary. Be concise — the summary will be spoken aloud.
-Maximum 3 sentences. No markdown. No bullet points."""
+SCHOLAR_SYSTEM = """You are a research assistant that synthesizes information clearly and concisely.
+
+Your response must include TWO summaries with clear delineation:
+
+1. **Written Summary**: Detailed but concise, including all key information and important details.
+2. **Spoken Summary**: Maximum 3 sentences, optimized for reading aloud, no markdown or bullet points.
+
+Format your response as:
+WRITTEN:
+[detailed summary here]
+
+SPOKEN:
+[3-sentence spoken summary here]"""
 
 
 async def scholar_respond(query: str) -> str:
@@ -96,7 +106,7 @@ async def scholar_respond(query: str) -> str:
         messages=messages,
         system=SCHOLAR_SYSTEM,
         mode="reasoning",
-        max_tokens=256,
+        max_tokens=512,
     )
 
     return response

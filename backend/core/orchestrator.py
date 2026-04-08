@@ -9,7 +9,6 @@ from assistant import executive_respond
 from core.persona import persona_stream, persona_respond
 
 
-
 # ─── State ────────────────────────────────────────────────────────────────────
 
 class AgentState(TypedDict):

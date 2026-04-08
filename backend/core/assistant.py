@@ -47,6 +47,92 @@ def get_gmail_service():
 
 # ─── Calendar ─────────────────────────────────────────────────────────────────
 
+async def add_event_to_calendar(title: str, date_description: str, time_str: str = "10:00 AM") -> dict:
+    """Add an event to Google Calendar based on natural language date description."""
+    try:
+        # Use LLM to parse the natural language date
+        messages = [{
+            "role": "user",
+            "content": f"Convert this date description to ISO format (YYYY-MM-DD). Today is {datetime.now().strftime('%Y-%m-%d')}. Parse: {date_description}\n\nRespond with ONLY the date in YYYY-MM-DD format, nothing else."
+        }]
+        
+        date_str = await llm_complete(
+            messages=messages,
+            system="You are a date parser. Convert natural language dates to ISO format (YYYY-MM-DD). Always respond with ONLY the date.",
+            mode="persona",
+            max_tokens=16,
+        )
+        
+        event_date = datetime.fromisoformat(date_str.strip())
+        
+        # Parse the time
+        time_obj = datetime.strptime(time_str, "%I:%M %p").time()
+        event_datetime = datetime.combine(event_date.date(), time_obj)
+        
+        service = get_calendar_service()
+        loop = asyncio.get_event_loop()
+        
+        event = {
+            "summary": title,
+            "start": {
+                "dateTime": event_datetime.isoformat(),
+                "timeZone": "UTC",
+            },
+            "end": {
+                "dateTime": (event_datetime + timedelta(hours=1)).isoformat(),
+                "timeZone": "UTC",
+            },
+        }
+        
+        result = await loop.run_in_executor(
+            None,
+            lambda: service.events().insert(
+                calendarId="primary",
+                body=event,
+            ).execute()
+        )
+        
+        return {
+            "success": True,
+            "event_id": result.get("id"),
+            "title": title,
+            "start": event_datetime.isoformat(),
+            "message": f"Added '{title}' to your calendar for {event_datetime.strftime('%B %d at %I:%M %p')}"
+        }
+    except Exception as e:
+        print(f"[executive] calendar creation error: {e}")
+        return {"success": False, "error": str(e), "message": f"couldn't add that event~ {str(e)}"}
+
+
+async def plan_schedule(query: str, date_str: str = None, time_str: str = None) -> str:
+    """Handle scheduling requests from the user."""
+    print(f"[executive] scheduling: {query}")
+    
+    # Extract event title and date from query using LLM
+    messages = [{
+        "role": "user",
+        "content": f"Extract the event title and date from this request: '{query}'. Respond in format: TITLE|DATE\nExample: Team meeting|next Tuesday"
+    }]
+    
+    extraction = await llm_complete(
+        messages=messages,
+        system="You extract event details from user requests. Respond in format: TITLE|DATE (nothing else)",
+        mode="persona",
+        max_tokens=32,
+    )
+    
+    try:
+        parts = extraction.strip().split("|")
+        event_title = parts[0].strip() if len(parts) > 0 else "Event"
+        event_date = parts[1].strip() if len(parts) > 1 else date_str or "tomorrow"
+        event_time = time_str or "10:00 AM"
+    except:
+        return "hmm, i didn't quite catch that~ try something like 'add a meeting next Tuesday at 2pm'"
+    
+    result = await add_event_to_calendar(event_title, event_date, event_time)
+    return result["message"]
+
+
 async def get_todays_events() -> list[dict]:
     try:
         service = get_calendar_service()
@@ -137,14 +223,24 @@ async def get_unread_emails(max_results: int = 5) -> list[dict]:
 
 # ─── Summarizer ───────────────────────────────────────────────────────────────
 
-EXECUTIVE_SYSTEM = """You are a personal assistant. Summarize the provided
-calendar or email data into 1-2 spoken sentences. Be concise and natural.
-No markdown."""
+EXECUTIVE_SYSTEM = """You are a personal assistant. Handle three types of requests:
+1. Calendar/event summaries: Summarize calendar or email data into 1-2 spoken sentences.
+2. Scheduling requests: Help add events to the calendar.
+3. Email summaries: Summarize unread emails concisely.
+
+Be concise, natural, and helpful. No markdown."""
 
 
 async def executive_respond(query: str) -> str:
     print(f"[executive] handling: {query}")
 
+    is_scheduling = any(w in query.lower() for w in [
+        "add", "schedule", "book", "set up", "create event", "add event"
+    ])
+    
+    if is_scheduling:
+        return await plan_schedule(query)
+    
     is_calendar = any(w in query.lower() for w in [
         "calendar", "meeting", "schedule", "event", "today", "remind"
     ])
