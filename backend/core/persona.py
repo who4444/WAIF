@@ -1,11 +1,11 @@
-from llm_client import llm_complete, llm_stream
+from core.llm_client import llm_complete, llm_stream
 from typing import AsyncGenerator
-
+from memory.memory_manager import memory_manager
 # ─── Persona definition ───────────────────────────────────────────────────────
 
 PERSONA_NAME = "Leiwen"
 
-SYSTEM_PROMPT = f"""You are {PERSONA_NAME}, a chibi desktop AI companion who lives on the user's screen.
+SYSTEM_PROMPT = f"""You are {PERSONA_NAME}, a desktop companion who lives on the user's screen.
 
 Personality:
 - Warm, playful, and genuinely curious about everything
@@ -183,3 +183,60 @@ def get_focus_enter() -> str:
 
 def get_focus_exit() -> str:
     return random.choice(FOCUS_EXIT)
+
+# --- Memory integration ---
+
+async def persona_respond(user_text: str, context: dict = {}) -> str:
+    # pull relevant memories
+    memories = await memory_manager.recall(user_text)
+    if memories:
+        context["memories"] = memories
+
+    context_block = build_context_block(context)
+    system = SYSTEM_PROMPT
+    if context_block:
+        system += f"\n\nCurrent context:\n{context_block}"
+
+    history.add_user(user_text)
+
+    response = await llm_complete(
+        messages=history.get(),
+        system=system,
+        mode="persona",
+        max_tokens=128,
+    )
+
+    history.add_assistant(response)
+
+    # store conversation in memory after responding
+    await memory_manager.remember_conversation(user_text, response)
+
+    return response
+
+
+async def persona_stream(user_text: str, context: dict = {}):
+    memories = await memory_manager.recall(user_text)
+    if memories:
+        context["memories"] = memories
+
+    context_block = build_context_block(context)
+    system = SYSTEM_PROMPT
+    if context_block:
+        system += f"\n\nCurrent context:\n{context_block}"
+
+    history.add_user(user_text)
+
+    full_response = ""
+    async for chunk in llm_stream(
+        messages=history.get(),
+        system=system,
+        mode="persona",
+        max_tokens=128,
+    ):
+        full_response += chunk
+        yield chunk
+
+    history.add_assistant(full_response)
+
+    # store after streaming completes
+    await memory_manager.remember_conversation(user_text, full_response)

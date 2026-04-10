@@ -10,6 +10,9 @@ from config import *
 from core.llm_client import llm_stream
 from core.persona import persona_stream, get_greeting, get_focus_enter, get_focus_exit
 from perception.manager import SensesManager
+from memory.memory_manager import memory_manager
+from core.tts import generate_tts
+
 app = FastAPI()
 
 app.add_middleware(
@@ -127,7 +130,11 @@ async def send_message(text: str, app_context: str = ""):
             "text": full_text,
         })
 
-    await manager.emit_speech(full_text)
+    # generate TTS in parallel with text streaming
+    audio_url = await generate_tts(full_text)
+
+    # send final speech event with audio
+    await manager.emit_speech(full_text, audio_url)
     return { "ok": True }
 
 
@@ -155,9 +162,10 @@ async def startup_greeting():
     # wait for frontend to connect
     await asyncio.sleep(3)
     text = get_greeting()
+    audio_url = await generate_tts(text)
     await manager.emit({ "type": "WAKE" })
     await asyncio.sleep(0.2)
-    await manager.emit_speech(text)
+    await manager.emit_speech(text, audio_url)
 # ─── Heartbeat ────────────────────────────────────────────────────────────────
 
 async def heartbeat():
@@ -245,3 +253,20 @@ async def handle_app_change(app_name: str):
         await manager.emit({ "type": "FOCUS_MODE" })
     else:
         await manager.emit({ "type": "FOCUS_END" })
+
+
+
+@app.get("/memory/recall")
+async def recall_memory(query: str):
+    result = await memory_manager.recall(query)
+    return { "result": result }
+
+@app.get("/memory/week")
+async def recall_week():
+    result = await memory_manager.recall_week()
+    return { "result": result }
+
+@app.post("/memory/fact")
+async def store_fact(fact: str):
+    await memory_manager.remember_fact(fact)
+    return { "ok": True }

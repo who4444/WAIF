@@ -1,6 +1,6 @@
 import asyncio
-from screen import ScreenWatcher, get_screen_context
-from audio import AudioListener
+from perception.screen import ScreenWatcher, get_screen_context
+from perception.audio import AudioListener
 
 class SensesManager:
     def __init__(self, on_wake, on_transcription, on_app_change):

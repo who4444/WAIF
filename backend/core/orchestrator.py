@@ -4,8 +4,8 @@ from langgraph.graph.message import add_messages
 from langchain_core.messages import HumanMessage, AIMessage
 import asyncio
 from core.llm_client import llm_complete, llm_stream
-from scholar import scholar_respond
-from assistant import executive_respond
+from core.scholar import scholar_respond
+from core.assistant import executive_respond
 from core.persona import persona_stream, persona_respond
 
 
@@ -109,7 +109,7 @@ def build_graph():
         route_intent,
         {
             "scholar":   "scholar",
-            "engineer":  "engineer",
+            # "engineer":  "engineer",
             "executive": "executive",
             "persona":   "persona",
         }
@@ -117,7 +117,7 @@ def build_graph():
 
     # all pipelines end
     graph.add_edge("scholar",   END)
-    graph.add_edge("engineer",  END)
+    # graph.add_edge("engineer",  END)
     graph.add_edge("executive", END)
     graph.add_edge("persona",   END)
 

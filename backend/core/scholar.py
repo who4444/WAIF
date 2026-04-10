@@ -1,7 +1,7 @@
 import arxiv
 from tavily import TavilyClient
 from firecrawl import FirecrawlApp
-from llm import llm_complete
+from core.llm_client import llm_complete
 from config import TAVILY_API_KEY
 
 tavily = TavilyClient(api_key=TAVILY_API_KEY)
