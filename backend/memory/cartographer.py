@@ -69,10 +69,9 @@ async def recall_context(query: str) -> str:
 async def recall_week() -> str:
     return await recall_context("what happened this week")
 
-
 async def recall_project(project_name: str) -> str:
     return await recall_context(f"project {project_name}")
-
+    
 
 async def recall_person(name: str) -> str:
     return await recall_context(f"person {name}")

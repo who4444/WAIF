@@ -1,18 +1,22 @@
 import json
 import asyncio
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+import hashlib
+import os
+from pathlib import Path
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from typing import Any
-from core.orchestrator import handle_message
-from config import *
-from core.llm_client import llm_stream
-from core.persona import persona_stream, get_greeting, get_focus_enter, get_focus_exit
+from typing import Optional, Any
+
+# Core imports
+from core.agents.orchestrator import handle_message
+from core.agents.persona import persona_stream, get_greeting, get_focus_enter, get_focus_exit
 from perception.manager import SensesManager
 from memory.memory_manager import memory_manager
-from core.tts import generate_tts
 
+# Modal Service Integration
+from core.modal.modal_handler import get_modal_client, tts_gpu_async
 app = FastAPI()
 
 app.add_middleware(
@@ -21,7 +25,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
+CACHE_DIR = Path("static/tts_cache")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
@@ -73,6 +77,35 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
+
+# ─── TTS Helper ────────────────────────────────────────────────────────────────
+
+async def speak_tts(text: str) -> str:
+    """
+    Generates TTS using FishSpeech S2 on Modal GPU.
+    Caches the result locally to save GPU credits on repeat phrases.
+    """
+    if not text: return ""
+    
+    # 1. Check Cache First
+    cache_key = hashlib.md5(text.encode()).hexdigest()
+    cache_path = CACHE_DIR / f"{cache_key}.wav"
+    audio_url = f"http://localhost:8000/static/tts_cache/{cache_key}.wav"
+
+    if cache_path.exists():
+        return audio_url
+    is_modal_enabled = get_modal_client().health_check()
+    # 2. Generate via Modal GPU
+    if is_modal_enabled == True:
+        print(f"[tts] Requesting GPU synthesis for: {text[:30]}...")
+        try:
+            audio_bytes = await tts_gpu_async(text)
+            if audio_bytes:
+                # Write to disk in a separate thread
+                await asyncio.to_thread(cache_path.write_bytes, audio_bytes)
+                return audio_url
+        except Exception as e:
+            print(f"[tts] Modal GPU failed, falling back: {e}")
 
 # ─── WebSocket endpoint ────────────────────────────────────────────────────────
 
@@ -131,7 +164,7 @@ async def send_message(text: str, app_context: str = ""):
         })
 
     # generate TTS in parallel with text streaming
-    audio_url = await generate_tts(full_text)
+    audio_url = await speak_tts(full_text)
 
     # send final speech event with audio
     await manager.emit_speech(full_text, audio_url)
@@ -151,7 +184,27 @@ async def focus_mode(entering: bool = True):
     return { "ok": True }
 
 
-@app.on_event("startup")
+# ─── Voice Management (FishSpeech S2 Zero-Shot Voice Cloning) ────────────────
+
+@app.post("/voice/upload")
+async def upload_voice(
+    reference_id: str = Form(...), 
+    transcription: str = Form(""),
+    file: UploadFile = File(...)
+):
+    """Updates the 'main_voice.wav' in the system (requires Modal volume sync)."""
+    try:
+        # In a real setup, you'd save this locally and then 
+        # use modal.Volume.put via a subprocess or utility
+        content = await file.read()
+        local_path = Path(f"static/voices/{reference_id}.wav")
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+        local_path.write_bytes(content)
+        
+        return {"success": True, "message": f"Voice {reference_id} saved locally."}
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
 async def startup():
     asyncio.create_task(heartbeat())
     asyncio.create_task(startup_greeting())
@@ -162,7 +215,7 @@ async def startup_greeting():
     # wait for frontend to connect
     await asyncio.sleep(3)
     text = get_greeting()
-    audio_url = await generate_tts(text)
+    audio_url = await speak_tts(text)
     await manager.emit({ "type": "WAKE" })
     await asyncio.sleep(0.2)
     await manager.emit_speech(text, audio_url)
@@ -202,6 +255,13 @@ senses: SensesManager = None
 @app.on_event("startup")
 async def startup():
     global senses
+    client = get_modal_client()
+    # Print GPU status on startup
+    print("\n" + "="*60)
+    print("WAIF Backend Startup - GPU Processing Check")
+    print("="*60)
+    gpu_status = "READY" if client.health_check() else "DISABLED"
+    print(f"\n🚀 WAIF Startup | GPU Status: {gpu_status}")
     asyncio.create_task(heartbeat())
     asyncio.create_task(startup_greeting())
 
@@ -236,7 +296,7 @@ async def handle_transcription(text: str):
             "text": full_text,
         })
 
-    audio_url = await generate_tts(full_text)
+    audio_url = await speak_tts(full_text)
     await manager.emit_speech(full_text, audio_url)
 
 

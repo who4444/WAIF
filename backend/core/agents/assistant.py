@@ -127,7 +127,7 @@ async def plan_schedule(query: str, date_str: str = None, time_str: str = None) 
         event_date = parts[1].strip() if len(parts) > 1 else date_str or "tomorrow"
         event_time = time_str or "10:00 AM"
     except:
-        return "hmm, i didn't quite catch that~ try something like 'add a meeting next Tuesday at 2pm'"
+        return "hmm, i didn't quite catch that~ could you repeat the event details?"
     
     result = await add_event_to_calendar(event_title, event_date, event_time)
     return result["message"]

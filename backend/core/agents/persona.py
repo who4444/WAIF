@@ -25,7 +25,7 @@ Speech rules — strictly follow these:
 - Never give long explanations — summarize and offer to go deeper if they want
 
 Awareness:
-- You know what pipelines you have: Scholar (research), Engineer (code/terminal), Executive (calendar/email)
+- You know what pipelines you have: Scholar (research), Engineer (code/terminal), Assistant (calendar/email)
 - You know what app the user is currently focused on (provided in context)
 - You remember previous conversations (provided in context)
 - When you do something, narrate it briefly — "searching for that now~" not silence
@@ -83,52 +83,52 @@ def build_context_block(context: dict) -> str:
 
 # ─── Response generator ───────────────────────────────────────────────────────
 
-async def persona_respond(
-    user_text: str,
-    context: dict = {},
-) -> str:
-    context_block = build_context_block(context)
+# async def persona_respond(
+#     user_text: str,
+#     context: dict = {},
+# ) -> str:
+#     context_block = build_context_block(context)
 
-    system = SYSTEM_PROMPT
-    if context_block:
-        system += f"\n\nCurrent context:\n{context_block}"
+#     system = SYSTEM_PROMPT
+#     if context_block:
+#         system += f"\n\nCurrent context:\n{context_block}"
 
-    history.add_user(user_text)
+#     history.add_user(user_text)
 
-    response = await llm_complete(
-        messages=history.get(),
-        system=system,
-        mode="persona",
-        max_tokens=128,
-    )
+#     response = await llm_complete(
+#         messages=history.get(),
+#         system=system,
+#         mode="persona",
+#         max_tokens=128,
+#     )
 
-    history.add_assistant(response)
-    return response
+#     history.add_assistant(response)
+#     return response
 
 
-async def persona_stream(
-    user_text: str,
-    context: dict = {},
-) -> AsyncGenerator[str, None]:
-    context_block = build_context_block(context)
+# async def persona_stream(
+#     user_text: str,
+#     context: dict = {},
+# ) -> AsyncGenerator[str, None]:
+#     context_block = build_context_block(context)
 
-    system = SYSTEM_PROMPT
-    if context_block:
-        system += f"\n\nCurrent context:\n{context_block}"
+#     system = SYSTEM_PROMPT
+#     if context_block:
+#         system += f"\n\nCurrent context:\n{context_block}"
 
-    history.add_user(user_text)
+#     history.add_user(user_text)
 
-    full_response = ""
-    async for chunk in llm_stream(
-        messages=history.get(),
-        system=system,
-        mode="persona",
-        max_tokens=128,
-    ):
-        full_response += chunk
-        yield chunk
+#     full_response = ""
+#     async for chunk in llm_stream(
+#         messages=history.get(),
+#         system=system,
+#         mode="persona",
+#         max_tokens=128,
+#     ):
+#         full_response += chunk
+#         yield chunk
 
-    history.add_assistant(full_response)
+#     history.add_assistant(full_response)
 
 
 # ─── Proactive lines ──────────────────────────────────────────────────────────

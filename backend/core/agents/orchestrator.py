@@ -4,10 +4,10 @@ from langgraph.graph.message import add_messages
 from langchain_core.messages import HumanMessage, AIMessage
 import asyncio
 from core.llm_client import llm_complete, llm_stream
-from core.scholar import scholar_respond
-from core.assistant import executive_respond
-from core.persona import persona_stream, persona_respond
-
+from .scholar import scholar_respond
+from .assistant import executive_respond
+from .persona import  persona_respond
+from .engineer import engineer_respond
 
 # ─── State ────────────────────────────────────────────────────────────────────
 
@@ -30,16 +30,19 @@ def classify_intent(state: AgentState) -> AgentState:
         "what is", "explain", "summarize", "look up"
     ]):
         intent = "scholar"
+
     elif any(w in last for w in [
         "run", "execute", "code", "debug", "fix", "git",
         "terminal", "install", "build", "error", "script"
     ]):
         intent = "engineer"
+
     elif any(w in last for w in [
         "email", "calendar", "meeting", "schedule", "slack",
         "message", "mail", "remind", "event", "task"
     ]):
         intent = "executive"
+
     else:
         intent = "persona"
 
@@ -58,22 +61,16 @@ async def scholar_node(state: AgentState) -> AgentState:
     response = await scholar_respond(last)
     return { **state, "speech_text": response, "done": True }
 
-# async def engineer_node(state: AgentState) -> AgentState:
-#     print("[engineer] handling engineering task")
-#     # placeholder — full implementation in Phase 9
-#     return {
-#         **state,
-#         "speech_text": "on it! let me check that~",
-#         "done": True
-#     }
 
+async def engineer_node(state: AgentState) -> AgentState:
+    last = state["messages"][-1].content
+    response = await engineer_respond(last)
+    return { **state, "speech_text": response, "done": True }
 
 async def assistant_node(state: AgentState) -> AgentState:
     last = state["messages"][-1].content
     response = await executive_respond(last)
     return { **state, "speech_text": response, "done": True }
-
-
 
 async def persona_node(state: AgentState) -> AgentState:
     print("[persona] handling conversation")
@@ -82,11 +79,7 @@ async def persona_node(state: AgentState) -> AgentState:
 
     response = await persona_respond(last, context)
 
-    return {
-        **state,
-        "speech_text": response,
-        "done": True,
-    }
+    return {**state, "speech_text": response, "done": True}
 
 # ─── Build graph ──────────────────────────────────────────────────────────────
 
@@ -96,7 +89,7 @@ def build_graph():
     # nodes
     graph.add_node("classify", classify_intent)
     graph.add_node("scholar", scholar_node)
-    # graph.add_node("engineer", engineer_node)
+    graph.add_node("engineer", engineer_node)
     graph.add_node("executive", assistant_node)
     graph.add_node("persona", persona_node)
 
@@ -109,7 +102,7 @@ def build_graph():
         route_intent,
         {
             "scholar":   "scholar",
-            # "engineer":  "engineer",
+            "engineer":  "engineer",
             "executive": "executive",
             "persona":   "persona",
         }
@@ -117,7 +110,7 @@ def build_graph():
 
     # all pipelines end
     graph.add_edge("scholar",   END)
-    # graph.add_edge("engineer",  END)
+    graph.add_edge("engineer",  END)
     graph.add_edge("executive", END)
     graph.add_edge("persona",   END)
 
