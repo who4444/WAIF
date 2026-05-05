@@ -30,7 +30,7 @@ class AudioListener:
             try:
                 # Lookup the remote function (Class.method format)
                 self.modal_transcribe = modal.Cls.from_name(
-                    MODAL_APP_NAME, "WhisperTTS.transcribe"
+                    MODAL_APP_NAME, "WhisperSTT.transcribe"
                 )
                 print("[modal] remote function linked")
             except Exception as e:
@@ -48,6 +48,23 @@ class AudioListener:
             self.recorder.stop()
 
     def _run(self):
+        # openwakeword >=0.4.0 bundles models in the package and removed
+        # download_models(), but RealtimeSTT 0.3.104 still calls it. Patch it.
+        # Also, openwakeword 0.4.0 AudioFeatures doesn't accept inference_framework
+        # kwarg (added in 0.5.0), but RealtimeSTT passes it through Model -> AudioFeatures.
+        try:
+            import openwakeword.utils as owu
+            if not hasattr(owu, "download_models"):
+                owu.download_models = lambda: None
+
+            _orig_af_init = owu.AudioFeatures.__init__
+            def _patched_af_init(self, *args, **kwargs):
+                kwargs.pop("inference_framework", None)
+                _orig_af_init(self, *args, **kwargs)
+            owu.AudioFeatures.__init__ = _patched_af_init
+        except ImportError:
+            pass
+
         try:
             from RealtimeSTT import AudioToTextRecorder
         except ImportError:

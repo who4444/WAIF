@@ -6,12 +6,15 @@ from pathlib import Path
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from typing import Optional, Any
+from typing import Optional, Any, AsyncGenerator
+import json as json_module
 
 # Core imports
 from core.agents.orchestrator import handle_message
-from core.agents.persona import persona_stream, get_greeting, get_focus_enter, get_focus_exit
+from core.agents.persona import persona_stream, get_greeting, get_focus_enter, get_focus_exit, SYSTEM_PROMPT
+from core.llm_client import llm_complete, llm_stream
 from perception.manager import SensesManager
 from memory.memory_manager import memory_manager
 
@@ -249,6 +252,59 @@ async def send_event(event: EventBody):
 async def speak(text: str, audio_url: str = ""):
     await manager.emit_speech(text, audio_url)
     return { "ok": True }
+
+
+# ─── Prompt endpoints (direct LLM access, no persona pipeline) ─────────────
+
+class PromptBody(BaseModel):
+    message: str
+    mode: str = "persona"        # persona | reasoning
+    system: Optional[str] = None # None = auto: persona mode uses Leiwen prompt
+    max_tokens: int = 512
+
+@app.post("/prompt")
+async def prompt(body: PromptBody):
+    """Direct LLM call. Returns raw response — no conversation history, no TTS."""
+    system = body.system
+    if system is None and body.mode == "persona":
+        system = SYSTEM_PROMPT
+    elif system is None:
+        system = ""
+
+    messages = [{"role": "user", "content": body.message}]
+    response = await llm_complete(
+        messages=messages,
+        system=system,
+        mode=body.mode,
+        max_tokens=body.max_tokens,
+    )
+    return {"response": response, "mode": body.mode}
+
+
+@app.post("/prompt/stream")
+async def prompt_stream(body: PromptBody):
+    """Streaming direct LLM call. Returns newline-delimited JSON chunks."""
+    system = body.system
+    if system is None and body.mode == "persona":
+        system = SYSTEM_PROMPT
+    elif system is None:
+        system = ""
+
+    messages = [{"role": "user", "content": body.message}]
+    full_response = ""
+    async def generate() -> AsyncGenerator[str, None]:
+        async for chunk in llm_stream(
+            messages=messages,
+            system=system,
+            mode=body.mode,
+            max_tokens=body.max_tokens,
+        ):
+            full_response += chunk
+            yield json_module.dumps({"chunk": chunk}) + "\n"
+        yield json_module.dumps({"done": True, "response": full_response}) + "\n"
+    audio_url = await speak_tts(full_response)
+    await manager.emit_speech(full_response, audio_url)
+    return StreamingResponse(generate(), media_type="text/event-stream")
 
 
 senses: SensesManager = None

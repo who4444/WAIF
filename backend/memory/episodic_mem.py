@@ -1,5 +1,5 @@
 from mem0 import Memory
-from config import OPENROUTER_API_KEY, QDRANT_HOST, QDRANT_PORT
+from config import OPENROUTER_API_KEY, OPENROUTER_LLM_MODEL, OPENROUTER_EMBEDDING_MODEL,QDRANT_HOST, QDRANT_PORT
 
 # ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -7,14 +7,14 @@ config = {
     "llm": {
         "provider": "openai",
         "config": {
-            "model": "qwen3.6-plus",
+            "model": OPENROUTER_LLM_MODEL,
             "api_key": OPENROUTER_API_KEY,
         }
     },
     "embedder": {
         "provider": "openai",
         "config": {
-            "model": "bge-m3",
+            "model": OPENROUTER_EMBEDDING_MODEL,
             "api_key": OPENROUTER_API_KEY,
         }
     },

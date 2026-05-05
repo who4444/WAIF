@@ -56,12 +56,25 @@ class ModalClient:
 
     # ─── TTS: FishSpeech S2 ───────────────────────────────────────────────────
 
-    def generate_speech(self, text: str) -> Optional[bytes]:
+    def generate_speech(
+        self,
+        text: str,
+        voice_ref_id: Optional[str] = None,
+        ref_audio_bytes: Optional[bytes] = None,
+        ref_text: str = "",
+        params: Optional[dict] = None,
+    ) -> Optional[bytes]:
         """Offloads high-quality TTS to Modal A10G GPU."""
         if not self.health_check(): return None
-        
+
         try:
-            result = self._tts_service.generate.remote(text)
+            result = self._tts_service.generate.remote(
+                text,
+                voice_ref_id=voice_ref_id,
+                ref_audio_bytes=ref_audio_bytes,
+                ref_text=ref_text,
+                params=params,
+            )
             return result
         except Exception as e:
             print(f"[modal] TTS Error: {e}")
@@ -105,10 +118,23 @@ def get_modal_client() -> ModalClient:
 
 # ─── Async Wrappers (Thread-safe) ─────────────────────────────────────────────
 
-async def tts_gpu_async(text: str) -> Optional[bytes]:
+async def tts_gpu_async(
+    text: str,
+    voice_ref_id: Optional[str] = None,
+    ref_audio_bytes: Optional[bytes] = None,
+    ref_text: str = "",
+    params: Optional[dict] = None,
+) -> Optional[bytes]:
     """Async TTS: Sends text to GPU and receives WAV bytes."""
     client = get_modal_client()
-    return await asyncio.to_thread(client.generate_speech, text)
+    return await asyncio.to_thread(
+        client.generate_speech,
+        text,
+        voice_ref_id=voice_ref_id,
+        ref_audio_bytes=ref_audio_bytes,
+        ref_text=ref_text,
+        params=params,
+    )
 
 async def transcribe_gpu_async(audio_bytes: bytes) -> Optional[str]:
     """Async STT: Sends audio bytes to GPU and receives text."""
@@ -119,3 +145,4 @@ async def embedding_gpu_async(text: str) -> Optional[List[float]]:
     """Async Embedding: Returns a 384-dim vector."""
     client = get_modal_client()
     return await asyncio.to_thread(client.get_embedding, text)
+

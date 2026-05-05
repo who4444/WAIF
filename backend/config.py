@@ -3,6 +3,8 @@ import os
 
 load_dotenv()
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+OPENROUTER_LLM_MODEL = os.getenv("OPENROUTER_LLM_MODEL","google/gemma-4-31b-it:free")
+OPENROUTER_EMBEDDING_MODEL = os.getenv("OPENROUTER_EMBEDDING_MODEL","")
 FISHSPEECH_REFERENCE_DIR = os.getenv("FISHSPEECH_REFERENCE_DIR", "backend/static/voice_references")
 FISHSPEECH_SERVER_URL = os.getenv("FISHSPEECH_SERVER_URL", "https://modal.com/apps/who4444/main")
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")

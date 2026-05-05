@@ -1,3 +1,4 @@
+import contextvars
 from core.llm_client import llm_complete, llm_stream
 from typing import AsyncGenerator
 from memory.memory_manager import memory_manager
@@ -58,7 +59,19 @@ class ConversationHistory:
         self.messages = []
 
 
-history = ConversationHistory()
+_history: contextvars.ContextVar[ConversationHistory] = contextvars.ContextVar(
+    "conversation_history"
+)
+
+
+def get_history() -> ConversationHistory:
+    """Return the ConversationHistory for the current async task context."""
+    try:
+        return _history.get()
+    except LookupError:
+        h = ConversationHistory()
+        _history.set(h)
+        return h
 
 
 # ─── Context builder ──────────────────────────────────────────────────────────
@@ -197,16 +210,16 @@ async def persona_respond(user_text: str, context: dict = {}) -> str:
     if context_block:
         system += f"\n\nCurrent context:\n{context_block}"
 
-    history.add_user(user_text)
+    get_history().add_user(user_text)
 
     response = await llm_complete(
-        messages=history.get(),
+        messages=get_history().get(),
         system=system,
         mode="persona",
         max_tokens=128,
     )
 
-    history.add_assistant(response)
+    get_history().add_assistant(response)
 
     # store conversation in memory after responding
     await memory_manager.remember_conversation(user_text, response)
@@ -224,11 +237,11 @@ async def persona_stream(user_text: str, context: dict = {}):
     if context_block:
         system += f"\n\nCurrent context:\n{context_block}"
 
-    history.add_user(user_text)
+    get_history().add_user(user_text)
 
     full_response = ""
     async for chunk in llm_stream(
-        messages=history.get(),
+        messages=get_history().get(),
         system=system,
         mode="persona",
         max_tokens=128,
@@ -236,7 +249,7 @@ async def persona_stream(user_text: str, context: dict = {}):
         full_response += chunk
         yield chunk
 
-    history.add_assistant(full_response)
+    get_history().add_assistant(full_response)
 
     # store after streaming completes
     await memory_manager.remember_conversation(user_text, full_response)
