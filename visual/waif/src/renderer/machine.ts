@@ -1,11 +1,39 @@
-import { createMachine, assign } from 'xstate'
+import { setup, assign } from 'xstate'
 
-const speechAssign = assign({
-  speechText: ({ event }: any) => event.text ?? '',
-  audioUrl: ({ event }: any) => event.audio_url ?? '',
-})
+type CompanionContext = {
+  speechText: string
+  audioUrl: string
+  targetX: number
+  targetY: number
+}
 
-export const companionMachine = createMachine({
+type CompanionEvent =
+  | { type: 'WAKE' }
+  | { type: 'ALERT' }
+  | { type: 'NAVIGATE'; x: number; y: number; label?: string }
+  | { type: 'FOCUS_MODE' }
+  | { type: 'FOCUS_END' }
+  | { type: 'SLEEP' }
+  | { type: 'TASK_START' }
+  | { type: 'SPEECH'; text?: string; audio_url?: string }
+  | { type: 'SPEECH_END' }
+
+export const companionMachine = setup({
+  types: {} as {
+    context: CompanionContext
+    events: CompanionEvent
+  },
+  actions: {
+    assignSpeech: assign({
+      speechText: ({ event }) => event.type === 'SPEECH' ? event.text ?? '' : '',
+      audioUrl: ({ event }) => event.type === 'SPEECH' ? event.audio_url ?? '' : '',
+    }),
+    assignTarget: assign({
+      targetX: ({ event }) => event.type === 'NAVIGATE' ? event.x : 0,
+      targetY: ({ event }) => event.type === 'NAVIGATE' ? event.y : 0,
+    }),
+  },
+}).createMachine({
   id: 'companion',
   initial: 'idle',
   context: {
@@ -19,22 +47,25 @@ export const companionMachine = createMachine({
       on: {
         WAKE: 'listening',
         ALERT: 'alert',
-        WANDER_START: 'wandering',
+        NAVIGATE: {
+          target: 'interacting',
+          actions: 'assignTarget',
+        },
         FOCUS_MODE: 'focused_dim',
         SLEEP: 'sleeping',
-        SPEECH: { target: 'speaking', actions: speechAssign },
+        SPEECH: { target: 'speaking', actions: 'assignSpeech' },
       },
     },
     listening: {
       on: {
         TASK_START: 'processing',
-        SPEECH: { target: 'speaking', actions: speechAssign },
+        SPEECH: { target: 'speaking', actions: 'assignSpeech' },
         WAKE: 'idle',
       },
     },
     processing: {
       on: {
-        SPEECH: { target: 'speaking', actions: speechAssign },
+        SPEECH: { target: 'speaking', actions: 'assignSpeech' },
         WAKE: 'idle',
       },
     },
@@ -48,30 +79,13 @@ export const companionMachine = createMachine({
       on: {
         WAKE: 'listening',
         SPEECH_END: 'idle',
-        SPEECH: { target: 'speaking', actions: speechAssign },
-      },
-    },
-    wandering: {
-      on: {
-        WANDER_STOP: 'idle',
-        NAVIGATE: {
-          target: 'interacting',
-          actions: assign({
-            targetX: ({ event }: any) => event.x,
-            targetY: ({ event }: any) => event.y,
-          }),
-        },
-        WAKE: 'listening',
-        ALERT: 'alert',
-        SPEECH: { target: 'speaking', actions: speechAssign },
+        SPEECH: { target: 'speaking', actions: 'assignSpeech' },
       },
     },
     interacting: {
       on: {
-        WANDER_START: 'wandering',
-        WANDER_STOP: 'idle',
         WAKE: 'listening',
-        SPEECH: { target: 'speaking', actions: speechAssign },
+        SPEECH: { target: 'speaking', actions: 'assignSpeech' },
       },
     },
     focused_dim: {
@@ -79,14 +93,14 @@ export const companionMachine = createMachine({
         FOCUS_END: 'idle',
         WAKE: 'listening',
         ALERT: 'alert',
-        SPEECH: { target: 'speaking', actions: speechAssign },
+        SPEECH: { target: 'speaking', actions: 'assignSpeech' },
       },
     },
     sleeping: {
       on: {
         WAKE: 'idle',
         ALERT: 'alert',
-        SPEECH: { target: 'speaking', actions: speechAssign },
+        SPEECH: { target: 'speaking', actions: 'assignSpeech' },
       },
     },
   },

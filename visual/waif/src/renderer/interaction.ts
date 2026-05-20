@@ -7,8 +7,6 @@ export interface IconTarget {
   y: number
 }
 
-const INTERACT_RADIUS = 80
-
 export class InteractionSystem {
   private steering: SteeringController
   private onInteractComplete: (icon: IconTarget) => void

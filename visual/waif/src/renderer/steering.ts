@@ -31,10 +31,18 @@ export class SteeringController {
     this.screenH = screenH
     this.onMove = onMove
   }
-    onMoveExternal(pos: Vec2, facingLeft: boolean) {
-      this.pos = pos
-      this.onMove(pos, facingLeft)
-    }
+
+  // --- NEW METHOD ---
+  updateBounds(width: number, height: number) {
+    this.screenW = width
+    this.screenH = height
+  }
+
+  onMoveExternal(pos: Vec2, facingLeft: boolean) {
+    this.pos = pos
+    this.onMove(pos, facingLeft)
+  }
+
   // called every ticker frame, dt in seconds
   update(dt: number) {
     if (this.paused) {
@@ -94,11 +102,42 @@ export class SteeringController {
     this.target = null
   }
 
+  wanderOnce() {
+    this.wandering = false
+    this.pickVisibleWanderTarget()
+  }
+
+  isMoving() {
+    return this.target !== null && !this.paused
+  }
+
   private pickWanderTarget() {
     const margin = 80
     this.target = {
       x: margin + Math.random() * (this.screenW - margin * 2),
       y: margin + Math.random() * (this.screenH - margin * 2),
+    }
+  }
+
+  private pickVisibleWanderTarget() {
+    const margin = 90
+    const maxX = Math.max(margin, this.screenW - margin)
+    const maxY = Math.max(margin, this.screenH - margin)
+    const runDistance = 180 + Math.random() * 220
+    const direction = Math.random() < 0.5 ? -1 : 1
+    const verticalDrift = (Math.random() - 0.5) * 80
+
+    let x = this.pos.x + direction * runDistance
+    x = Math.max(margin, Math.min(x, maxX))
+
+    if (Math.abs(x - this.pos.x) < 120) {
+      x = this.pos.x - direction * runDistance
+      x = Math.max(margin, Math.min(x, maxX))
+    }
+
+    this.target = {
+      x,
+      y: Math.max(margin, Math.min(this.pos.y + verticalDrift, maxY)),
     }
   }
 }
