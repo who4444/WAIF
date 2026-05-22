@@ -199,7 +199,8 @@ def get_focus_exit() -> str:
 
 # --- Memory integration ---
 
-async def persona_respond(user_text: str, context: dict = {}) -> str:
+async def persona_respond(user_text: str, context: dict | None = None) -> str:
+    context = dict(context or {})
     # pull relevant memories
     memories = await memory_manager.recall(user_text)
     if memories:
@@ -227,7 +228,8 @@ async def persona_respond(user_text: str, context: dict = {}) -> str:
     return response
 
 
-async def persona_stream(user_text: str, context: dict = {}):
+async def persona_stream(user_text: str, context: dict | None = None):
+    context = dict(context or {})
     memories = await memory_manager.recall(user_text)
     if memories:
         context["memories"] = memories

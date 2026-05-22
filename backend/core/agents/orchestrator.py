@@ -1,9 +1,7 @@
 from typing import TypedDict, Annotated
 from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
-from langchain_core.messages import HumanMessage, AIMessage
-import asyncio
-from core.llm_client import llm_complete, llm_stream
+from langchain_core.messages import HumanMessage
 from .scholar import scholar_respond
 from .assistant import executive_respond
 from .persona import  persona_respond
@@ -26,12 +24,6 @@ def classify_intent(state: AgentState) -> AgentState:
     last = state["messages"][-1].content.lower()
 
     if any(w in last for w in [
-        "search", "find", "research", "paper", "arxiv",
-        "what is", "explain", "summarize", "look up"
-    ]):
-        intent = "scholar"
-
-    elif any(w in last for w in [
         "run", "execute", "code", "debug", "fix", "git",
         "terminal", "install", "build", "error", "script"
     ]):
@@ -42,6 +34,12 @@ def classify_intent(state: AgentState) -> AgentState:
         "message", "mail", "remind", "event", "task"
     ]):
         intent = "executive"
+
+    elif any(w in last for w in [
+        "search", "find", "research", "paper", "arxiv",
+        "what is", "explain", "summarize", "look up"
+    ]):
+        intent = "scholar"
 
     else:
         intent = "persona"
@@ -59,6 +57,8 @@ def route_intent(state: AgentState) -> str:
 async def scholar_node(state: AgentState) -> AgentState:
     last = state["messages"][-1].content
     response = await scholar_respond(last)
+    if "SPOKEN:" in response:
+        response = response.split("SPOKEN:", 1)[1].strip()
     return { **state, "speech_text": response, "done": True }
 
 
@@ -122,11 +122,11 @@ orchestrator = build_graph()
 
 # ─── Public interface ─────────────────────────────────────────────────────────
 
-async def handle_message(text: str, context: dict = {}) -> dict:
+async def handle_message(text: str, context: dict | None = None) -> dict:
     state = await orchestrator.ainvoke({
         "messages": [HumanMessage(content=text)],
         "intent": "",
-        "context": context,
+        "context": context or {},
         "speech_text": "",
         "audio_url": "",
         "done": False,

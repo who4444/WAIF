@@ -40,7 +40,7 @@ async def extract_entities(text: str) -> dict:
 # ─── Store conversation as episode ────────────────────────────────────────────
 
 async def map_conversation(user_text: str, assistant_text: str):
-    content = f"User: {user_text}\Leiwen: {assistant_text}"
+    content = f"User: {user_text}\nLeiwen: {assistant_text}"
     await store_episode(content, source="conversation")
 
     # extract entities in background

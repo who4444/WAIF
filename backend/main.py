@@ -1,22 +1,23 @@
 import json
 import asyncio
 import hashlib
-import os
+import re
 from pathlib import Path
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File, Form
+from fastapi import Depends, FastAPI, Header, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from typing import Optional, Any, AsyncGenerator
+from typing import Optional, AsyncGenerator
 import json as json_module
 
 # Core imports
 from core.agents.orchestrator import handle_message
-from core.agents.persona import persona_stream, get_greeting, get_focus_enter, get_focus_exit, SYSTEM_PROMPT
+from core.agents.persona import get_greeting, get_focus_enter, get_focus_exit, SYSTEM_PROMPT
 from core.llm_client import llm_complete, llm_stream
 from perception.manager import SensesManager
 from memory.memory_manager import memory_manager
+from config import WAIF_ALLOWED_ORIGINS, WAIF_API_KEY
 
 # Modal Service Integration
 from core.modal.modal_handler import get_modal_client, tts_gpu_async
@@ -24,12 +25,28 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=WAIF_ALLOWED_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-CACHE_DIR = Path("static/tts_cache")
-app.mount("/static", StaticFiles(directory="static"), name="static")
+BACKEND_ROOT = Path(__file__).resolve().parent
+STATIC_DIR = BACKEND_ROOT / "static"
+CACHE_DIR = STATIC_DIR / "tts_cache"
+VOICE_DIR = STATIC_DIR / "voices"
+CACHE_DIR.mkdir(parents=True, exist_ok=True)
+VOICE_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+def _origin_allowed(origin: str | None) -> bool:
+    if not origin:
+        return True
+    return origin in WAIF_ALLOWED_ORIGINS
+
+
+async def require_api_key(x_waif_api_key: str | None = Header(default=None)):
+    if WAIF_API_KEY and x_waif_api_key != WAIF_API_KEY:
+        raise HTTPException(status_code=401, detail="invalid API key")
 
 
 # ─── Connection Manager ────────────────────────────────────────────────────────
@@ -79,6 +96,8 @@ class ConnectionManager:
 
 
 manager = ConnectionManager()
+senses: SensesManager | None = None
+background_tasks: list[asyncio.Task] = []
 
 
 # ─── TTS Helper ────────────────────────────────────────────────────────────────
@@ -88,12 +107,13 @@ async def speak_tts(text: str) -> str:
     Generates TTS using FishSpeech S2 on Modal GPU.
     Caches the result locally to save GPU credits on repeat phrases.
     """
-    if not text: return ""
+    if not text:
+        return ""
     
     # 1. Check Cache First
     cache_key = hashlib.md5(text.encode()).hexdigest()
     cache_path = CACHE_DIR / f"{cache_key}.wav"
-    audio_url = f"http://localhost:8000/static/tts_cache/{cache_key}.wav"
+    audio_url = f"/static/tts_cache/{cache_key}.wav"
 
     if cache_path.exists():
         return audio_url
@@ -109,11 +129,19 @@ async def speak_tts(text: str) -> str:
                 return audio_url
         except Exception as e:
             print(f"[tts] Modal GPU failed, falling back: {e}")
+    return ""
 
 # ─── WebSocket endpoint ────────────────────────────────────────────────────────
 
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
+    if not _origin_allowed(ws.headers.get("origin")):
+        await ws.close(code=1008)
+        return
+    ws_key = ws.headers.get("x-waif-api-key") or ws.query_params.get("api_key")
+    if WAIF_API_KEY and ws_key != WAIF_API_KEY:
+        await ws.close(code=1008)
+        return
     await manager.connect(ws)
     try:
         while True:
@@ -139,16 +167,17 @@ async def handle_frontend_event(event: dict):
 
         # run through orchestrator
         result = await handle_message(text)
+        audio_url = result.get("audio_url") or await speak_tts(result["speech_text"])
 
         # send speech back to frontend
         await manager.emit_speech(
             result["speech_text"],
-            result.get("audio_url", "")
+            audio_url,
         )
 
 
 @app.post("/message")
-async def send_message(text: str, app_context: str = ""):
+async def send_message(text: str, app_context: str = "", _: None = Depends(require_api_key)):
     await manager.emit({ "type": "WAKE" })
     await asyncio.sleep(0.1)
     await manager.emit({ "type": "TASK_START" })
@@ -157,17 +186,9 @@ async def send_message(text: str, app_context: str = ""):
     if app_context:
         context["active_app"] = app_context
 
-    full_text = ""
-    async for chunk in persona_stream(text, context):
-        full_text += chunk
-        await manager.emit({
-            "type": "SPEECH_CHUNK",
-            "chunk": chunk,
-            "text": full_text,
-        })
-
-    # generate TTS in parallel with text streaming
-    audio_url = await speak_tts(full_text)
+    result = await handle_message(text, context)
+    full_text = result["speech_text"]
+    audio_url = result.get("audio_url") or await speak_tts(full_text)
 
     # send final speech event with audio
     await manager.emit_speech(full_text, audio_url)
@@ -175,7 +196,7 @@ async def send_message(text: str, app_context: str = ""):
 
 
 @app.post("/focus")
-async def focus_mode(entering: bool = True):
+async def focus_mode(entering: bool = True, _: None = Depends(require_api_key)):
     if entering:
         text = get_focus_enter()
         await manager.emit({ "type": "FOCUS_MODE" })
@@ -193,25 +214,37 @@ async def focus_mode(entering: bool = True):
 async def upload_voice(
     reference_id: str = Form(...), 
     transcription: str = Form(""),
-    file: UploadFile = File(...)
+    file: UploadFile = File(...),
+    _: None = Depends(require_api_key),
 ):
     """Updates the 'main_voice.wav' in the system (requires Modal volume sync)."""
     try:
-        # In a real setup, you'd save this locally and then 
-        # use modal.Volume.put via a subprocess or utility
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", reference_id):
+            raise HTTPException(
+                status_code=400,
+                detail="reference_id must be 1-64 chars: letters, numbers, underscore, hyphen",
+            )
+        if file.content_type and not file.content_type.startswith("audio/"):
+            raise HTTPException(status_code=400, detail="voice upload must be an audio file")
+
         content = await file.read()
-        local_path = Path(f"static/voices/{reference_id}.wav")
-        local_path.parent.mkdir(parents=True, exist_ok=True)
-        local_path.write_bytes(content)
+        if len(content) > 10 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="voice upload is too large")
+
+        local_path = (VOICE_DIR / f"{reference_id}.wav").resolve()
+        if VOICE_DIR.resolve() not in local_path.parents:
+            raise HTTPException(status_code=400, detail="invalid reference path")
+        await asyncio.to_thread(local_path.write_bytes, content)
+
+        if transcription:
+            text_path = VOICE_DIR / f"{reference_id}.txt"
+            await asyncio.to_thread(text_path.write_text, transcription)
         
         return {"success": True, "message": f"Voice {reference_id} saved locally."}
+    except HTTPException:
+        raise
     except Exception as e:
-        return {"success": False, "message": str(e)}
-
-async def startup():
-    asyncio.create_task(heartbeat())
-    asyncio.create_task(startup_greeting())
-    print("[backend] started")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 async def startup_greeting():
@@ -229,11 +262,6 @@ async def heartbeat():
         await asyncio.sleep(30)
         await manager.emit({ "type": "PING" })
 
-@app.on_event("startup")
-async def startup():
-    asyncio.create_task(heartbeat())
-    print("[backend] started")
-
 
 # ─── Dev endpoints ────────────────────────────────────────────────────────────
 
@@ -242,14 +270,14 @@ class EventBody(BaseModel):
     model_config = { "extra": "allow" }
 
 @app.post("/send")
-async def send_event(event: EventBody):
+async def send_event(event: EventBody, _: None = Depends(require_api_key)):
     payload = event.model_dump()
     print(f"[send] {payload}")
     await manager.emit(payload)
     return { "ok": True }
 
 @app.post("/speak")
-async def speak(text: str, audio_url: str = ""):
+async def speak(text: str, audio_url: str = "", _: None = Depends(require_api_key)):
     await manager.emit_speech(text, audio_url)
     return { "ok": True }
 
@@ -263,7 +291,7 @@ class PromptBody(BaseModel):
     max_tokens: int = 512
 
 @app.post("/prompt")
-async def prompt(body: PromptBody):
+async def prompt(body: PromptBody, _: None = Depends(require_api_key)):
     """Direct LLM call. Returns raw response — no conversation history, no TTS."""
     system = body.system
     if system is None and body.mode == "persona":
@@ -282,7 +310,7 @@ async def prompt(body: PromptBody):
 
 
 @app.post("/prompt/stream")
-async def prompt_stream(body: PromptBody):
+async def prompt_stream(body: PromptBody, _: None = Depends(require_api_key)):
     """Streaming direct LLM call. Returns newline-delimited JSON chunks."""
     system = body.system
     if system is None and body.mode == "persona":
@@ -291,25 +319,25 @@ async def prompt_stream(body: PromptBody):
         system = ""
 
     messages = [{"role": "user", "content": body.message}]
-    full_response = ""
     async def generate() -> AsyncGenerator[str, None]:
+        chunks: list[str] = []
         async for chunk in llm_stream(
             messages=messages,
             system=system,
             mode=body.mode,
             max_tokens=body.max_tokens,
         ):
-            full_response += chunk
+            chunks.append(chunk)
             yield json_module.dumps({"chunk": chunk}) + "\n"
+        full_response = "".join(chunks)
+        audio_url = await speak_tts(full_response)
+        await manager.emit_speech(full_response, audio_url)
         yield json_module.dumps({"done": True, "response": full_response}) + "\n"
-    audio_url = await speak_tts(full_response)
-    await manager.emit_speech(full_response, audio_url)
     return StreamingResponse(generate(), media_type="text/event-stream")
 
 
-senses: SensesManager = None
 @app.on_event("startup")
-async def startup():
+async def startup_event():
     global senses
     client = get_modal_client()
     # Print GPU status on startup
@@ -317,9 +345,9 @@ async def startup():
     print("WAIF Backend Startup - GPU Processing Check")
     print("="*60)
     gpu_status = "READY" if client.health_check() else "DISABLED"
-    print(f"\n🚀 WAIF Startup | GPU Status: {gpu_status}")
-    asyncio.create_task(heartbeat())
-    asyncio.create_task(startup_greeting())
+    print(f"\nWAIF Startup | GPU Status: {gpu_status}")
+    background_tasks.append(asyncio.create_task(heartbeat()))
+    background_tasks.append(asyncio.create_task(startup_greeting()))
 
     loop = asyncio.get_event_loop()
 
@@ -330,6 +358,15 @@ async def startup():
     )
     senses.start(loop)
     print("[backend] started")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    if senses:
+        senses.stop()
+    for task in background_tasks:
+        task.cancel()
+    await asyncio.gather(*background_tasks, return_exceptions=True)
 
 
 async def handle_wake():
@@ -343,16 +380,9 @@ async def handle_transcription(text: str):
 
     await manager.emit({ "type": "TASK_START" })
 
-    full_text = ""
-    async for chunk in persona_stream(text, context):
-        full_text += chunk
-        await manager.emit({
-            "type": "SPEECH_CHUNK",
-            "chunk": chunk,
-            "text": full_text,
-        })
-
-    audio_url = await speak_tts(full_text)
+    result = await handle_message(text, context)
+    full_text = result["speech_text"]
+    audio_url = result.get("audio_url") or await speak_tts(full_text)
     await manager.emit_speech(full_text, audio_url)
 
 
@@ -373,16 +403,16 @@ async def handle_app_change(app_name: str):
 
 
 @app.get("/memory/recall")
-async def recall_memory(query: str):
+async def recall_memory(query: str, _: None = Depends(require_api_key)):
     result = await memory_manager.recall(query)
     return { "result": result }
 
 @app.get("/memory/week")
-async def recall_week():
+async def recall_week(_: None = Depends(require_api_key)):
     result = await memory_manager.recall_week()
     return { "result": result }
 
 @app.post("/memory/fact")
-async def store_fact(fact: str):
+async def store_fact(fact: str, _: None = Depends(require_api_key)):
     await memory_manager.remember_fact(fact)
     return { "ok": True }

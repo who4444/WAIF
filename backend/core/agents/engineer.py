@@ -1,5 +1,4 @@
 import asyncio
-import subprocess
 import shlex
 from github import Github
 from core.llm_client import llm_complete
@@ -11,22 +10,54 @@ github_client = Github(GITHUB_TOKEN) if GITHUB_TOKEN else None
 
 ALLOWED_COMMANDS = [
     "ls", "pwd", "echo", "cat", "grep", "find",
-    "git", "python", "node", "npm", "pip",
-    "mkdir", "touch", "cp", "mv",
+    "git", "python", "node", "npm",
 ]
 
 BLOCKED = ["rm -rf", "sudo", "chmod 777", "dd if", "> /dev/"]
+SHELL_METACHARS = {";", "&", "|", ">", "<", "`", "$", "(", ")", "\n"}
+SAFE_GIT_SUBCOMMANDS = {
+    "status", "log", "show", "diff", "branch", "remote", "rev-parse",
+}
+SAFE_VERSION_FLAGS = {"--version", "-v", "version"}
 
 
 def is_safe(command: str) -> bool:
     cmd = command.strip().lower()
     if any(b in cmd for b in BLOCKED):
         return False
-    base = shlex.split(cmd)[0] if cmd else ""
-    return base in ALLOWED_COMMANDS
+    if any(char in command for char in SHELL_METACHARS):
+        return False
+
+    try:
+        parts = shlex.split(command)
+    except ValueError:
+        return False
+
+    if not parts:
+        return False
+
+    base = parts[0]
+    if base not in ALLOWED_COMMANDS:
+        return False
+
+    if base == "find" and any(arg in {"-exec", "-delete"} for arg in parts[1:]):
+        return False
+
+    if base == "git":
+        return len(parts) > 1 and parts[1] in SAFE_GIT_SUBCOMMANDS
+
+    if base in {"python", "node", "npm"}:
+        return len(parts) > 1 and parts[1] in SAFE_VERSION_FLAGS
+
+    return True
 
 
 async def run_shell(command: str) -> dict:
+    try:
+        parts = shlex.split(command)
+    except ValueError as e:
+        return { "stdout": "", "stderr": f"invalid command: {e}", "returncode": 1 }
+
     if not is_safe(command):
         return {
             "stdout": "",
@@ -36,8 +67,8 @@ async def run_shell(command: str) -> dict:
 
     print(f"[engineer] running: {command}")
     try:
-        proc = await asyncio.create_subprocess_shell(
-            command,
+        proc = await asyncio.create_subprocess_exec(
+            *parts,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -100,8 +131,9 @@ async def debug_error(stderr: str, command: str) -> str:
 
 # ─── Main handler ─────────────────────────────────────────────────────────────
 
-INTENT_SYSTEM = """Extract the shell command or GitHub query from the user message.
-Respond with JSON only: {"action": "shell"|"github_prs"|"github_issues", "value": "..."}"""
+INTENT_SYSTEM = """Extract a safe read-only shell command or GitHub query from the user message.
+Respond with JSON only: {"action": "shell"|"github_prs"|"github_issues", "value": "..."}.
+Only produce shell commands for inspection, never installs, deletes, moves, copies, writes, or network operations."""
 
 
 async def engineer_respond(query: str) -> str:

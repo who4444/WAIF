@@ -1,15 +1,41 @@
 import asyncio
+import os
 import threading
+import time
 import numpy as np
 
 # ─── Config ───────────────────────────────────────────────────────────────────
 
-WAKE_WORD = "hey dear"
-WAKE_WORDS = [WAKE_WORD, "hey leiwen", "leiwen"]
+BUILT_IN_OPENWAKEWORD_MODELS = {
+    "alexa",
+    "hey_mycroft",
+    "hey_jarvis",
+    "timer",
+    "weather",
+}
+
+
+def _csv_env(name: str, default: str) -> list[str]:
+    value = os.getenv(name, default)
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _bool_env(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+# openWakeWord cannot detect arbitrary text phrases unless a matching custom
+# model is provided. The bundled model that maps closest to a companion wake
+# phrase is "hey_jarvis".
+WAKE_WORDS = _csv_env("WAIF_WAKE_WORDS", "hey_jarvis")
+OPENWAKEWORD_MODEL_PATHS = os.getenv("WAIF_OPENWAKEWORD_MODEL_PATHS", "").strip()
 
 # Set this to True to use Modal's GPU for transcription
-MODAL_ENABLED = True 
-MODAL_APP_NAME = "waif-gpu-service" 
+MODAL_ENABLED = _bool_env("WAIF_MODAL_STT_ENABLED", True)
+MODAL_APP_NAME = os.getenv("WAIF_MODAL_APP_NAME", "waif-gpu-service")
 
 # ─── Audio listener ───────────────────────────────────────────────────────────
 
@@ -26,8 +52,8 @@ class AudioListener:
         # Modal setup
         self.modal_transcribe = None
         if MODAL_ENABLED:
-            import modal
             try:
+                import modal
                 # Lookup the remote function (Class.method format)
                 self.modal_transcribe = modal.Cls.from_name(
                     MODAL_APP_NAME, "WhisperSTT.transcribe"
@@ -70,23 +96,45 @@ class AudioListener:
         except ImportError:
             print("[audio] ERROR: RealtimeSTT not installed.")
             return
+
+        unsupported_words = [
+            word for word in WAKE_WORDS
+            if word.lower().replace(" ", "_") not in BUILT_IN_OPENWAKEWORD_MODELS
+        ]
+        if unsupported_words and not OPENWAKEWORD_MODEL_PATHS:
+            print(
+                "[audio] WARNING: openWakeWord cannot detect arbitrary wake "
+                f"phrases without custom model files: {unsupported_words}. "
+                "Using bundled models instead. Say one of: "
+                f"{sorted(BUILT_IN_OPENWAKEWORD_MODELS)}"
+            )
         
         # We use a tiny model locally just for VAD/Fast feedback.
         # The heavy lifting will happen on the Modal GPU.
-        self.recorder = AudioToTextRecorder(
-            spinner=False,
-            model="tiny.en",          
-            language="en",
-            device="cpu",              # Local processing on CPU
-            wakeword_backend="oww",
-            wake_words=",".join(WAKE_WORDS),
-            on_wakeword_detected=self._on_wake_detected,
-            silero_sensitivity=0.5,
-            post_speech_silence_duration=0.6, # Slightly longer for Modal latency buffer
-            min_length_of_recording=0.5,
-        )
+        try:
+            self.recorder = AudioToTextRecorder(
+                spinner=False,
+                model="tiny.en",
+                language="en",
+                device="cpu",              # Local processing on CPU
+                wakeword_backend="oww",
+                wake_words=",".join(WAKE_WORDS),
+                openwakeword_model_paths=OPENWAKEWORD_MODEL_PATHS or None,
+                on_wakeword_detected=self._on_wake_detected,
+                silero_sensitivity=0.5,
+                post_speech_silence_duration=0.6, # Slightly longer for Modal latency buffer
+                min_length_of_recording=0.5,
+            )
+        except Exception as e:
+            print(f"[audio] ERROR: could not initialize microphone recorder: {e}")
+            print("[audio] Check microphone permissions, audio device access, and RealtimeSTT dependencies.")
+            return
 
-        print(f"[audio] listening for wake word: {WAKE_WORDS}")
+        if OPENWAKEWORD_MODEL_PATHS:
+            print(f"[audio] listening with custom openWakeWord model(s): {OPENWAKEWORD_MODEL_PATHS}")
+        else:
+            print(f"[audio] listening for bundled openWakeWord model(s): {sorted(BUILT_IN_OPENWAKEWORD_MODELS)}")
+            print(f"[audio] configured wake phrase hint: {WAKE_WORDS}")
 
         while self.running:
             try:
@@ -118,6 +166,8 @@ class AudioListener:
                             self.on_transcription(final_text.strip()),
                             self._loop
                         )
+                else:
+                    time.sleep(0.05)
             except Exception as e:
                 print(f"[audio] error in loop: {e}")
 

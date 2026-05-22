@@ -33,9 +33,9 @@ USER_ID = "user"
 
 # ─── Store ────────────────────────────────────────────────────────────────────
 
-async def store_memory(text: str, metadata: dict = {}):
+async def store_memory(text: str, metadata: dict | None = None):
     try:
-        memory.add(text, user_id=USER_ID, metadata=metadata)
+        memory.add(text, user_id=USER_ID, metadata=metadata or {})
         print(f"[memory] stored: {text[:50]}")
     except Exception as e:
         print(f"[memory] store error: {e}")
