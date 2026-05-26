@@ -74,8 +74,32 @@ SPOKEN:
 [3-sentence spoken summary here]"""
 
 
-async def scholar_respond(query: str) -> str:
+def _format_task_context(task: dict | None, original_request: str | None, previous_results: list[dict] | None) -> str:
+    if not task:
+        return ""
+    parts = [
+        f"Task objective: {task.get('objective', '')}",
+        f"Success criteria: {task.get('success_criteria', '')}",
+    ]
+    if original_request:
+        parts.append(f"Original user request: {original_request}")
+    if previous_results:
+        prior = "\n".join([
+            f"- {r.get('agent')} {r.get('task_id')}: {r.get('result')}"
+            for r in previous_results
+        ])
+        parts.append(f"Previous subagent results:\n{prior}")
+    return "\n".join(parts)
+
+
+async def scholar_respond(
+    query: str,
+    task: dict | None = None,
+    original_request: str | None = None,
+    previous_results: list[dict] | None = None,
+) -> str:
     print(f"[scholar] researching: {query}")
+    task_context = _format_task_context(task, original_request, previous_results)
 
     is_academic = any(w in query.lower() for w in [
         "paper", "arxiv", "research", "study", "published"
@@ -99,7 +123,12 @@ async def scholar_respond(query: str) -> str:
 
     messages = [{
         "role": "user",
-        "content": f"Query: {query}\n\nSources:\n{source_text}\n\nSummarize for spoken response."
+        "content": (
+            f"{task_context}\n\n"
+            f"Query: {query}\n\n"
+            f"Sources:\n{source_text}\n\n"
+            "Use the task objective and success criteria to summarize for spoken response."
+        )
     }]
 
     response = await llm_complete(

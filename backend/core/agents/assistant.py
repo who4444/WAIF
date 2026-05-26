@@ -231,16 +231,41 @@ EXECUTIVE_SYSTEM = """You are a personal assistant. Handle three types of reques
 Be concise, natural, and helpful. No markdown."""
 
 
-async def executive_respond(query: str) -> str:
+def _format_task_context(task: dict | None, original_request: str | None, previous_results: list[dict] | None) -> str:
+    if not task:
+        return ""
+
+    parts = [
+        f"Task objective: {task.get('objective', '')}",
+        f"Success criteria: {task.get('success_criteria', '')}",
+    ]
+    if original_request:
+        parts.append(f"Original user request: {original_request}")
+    if previous_results:
+        prior = "\n".join([
+            f"- {r.get('agent')} {r.get('task_id')}: {r.get('result')}"
+            for r in previous_results
+        ])
+        parts.append(f"Previous subagent results:\n{prior}")
+    return "\n".join(parts)
+
+
+async def executive_respond(
+    query: str,
+    task: dict | None = None,
+    original_request: str | None = None,
+    previous_results: list[dict] | None = None,
+) -> str:
     print(f"[executive] handling: {query}")
+    task_context = _format_task_context(task, original_request, previous_results)
 
     is_scheduling = any(w in query.lower() for w in [
         "add", "schedule", "book", "set up", "create event", "add event"
     ])
-    
+
     if is_scheduling:
         return await plan_schedule(query)
-    
+
     is_calendar = any(w in query.lower() for w in [
         "calendar", "meeting", "schedule", "event", "today", "remind"
     ])
@@ -254,7 +279,7 @@ async def executive_respond(query: str) -> str:
         ])
         messages = [{
             "role": "user",
-            "content": f"Summarize today's events:\n{event_text}"
+            "content": f"{task_context}\n\nSummarize today's events:\n{event_text}"
         }]
     else:
         emails = await get_unread_emails()
@@ -265,7 +290,7 @@ async def executive_respond(query: str) -> str:
         ])
         messages = [{
             "role": "user",
-            "content": f"Summarize these unread emails:\n{email_text}"
+            "content": f"{task_context}\n\nSummarize these unread emails:\n{email_text}"
         }]
 
     return await llm_complete(

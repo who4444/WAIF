@@ -131,15 +131,40 @@ async def debug_error(stderr: str, command: str) -> str:
 
 # ─── Main handler ─────────────────────────────────────────────────────────────
 
-INTENT_SYSTEM = """Extract a safe read-only shell command or GitHub query from the user message.
+INTENT_SYSTEM = """Extract a safe read-only shell command or GitHub query from the user message or task brief.
 Respond with JSON only: {"action": "shell"|"github_prs"|"github_issues", "value": "..."}.
 Only produce shell commands for inspection, never installs, deletes, moves, copies, writes, or network operations."""
 
 
-async def engineer_respond(query: str) -> str:
-    print(f"[engineer] handling: {query}")
+def _format_task_brief(query: str, task: dict | None, original_request: str | None, previous_results: list[dict] | None) -> str:
+    if not task:
+        return query
 
-    messages = [{ "role": "user", "content": query }]
+    parts = [
+        f"Original user request: {original_request or query}",
+        f"Task objective: {task.get('objective', '')}",
+        f"Task input: {task.get('input', query)}",
+        f"Success criteria: {task.get('success_criteria', '')}",
+    ]
+    if previous_results:
+        prior = "\n".join([
+            f"- {r.get('agent')} {r.get('task_id')}: {r.get('result')}"
+            for r in previous_results
+        ])
+        parts.append(f"Previous subagent results:\n{prior}")
+    return "\n".join(parts)
+
+
+async def engineer_respond(
+    query: str,
+    task: dict | None = None,
+    original_request: str | None = None,
+    previous_results: list[dict] | None = None,
+) -> str:
+    print(f"[engineer] handling: {query}")
+    task_brief = _format_task_brief(query, task, original_request, previous_results)
+
+    messages = [{ "role": "user", "content": task_brief }]
     intent_raw = await llm_complete(
         messages=messages,
         system=INTENT_SYSTEM,
