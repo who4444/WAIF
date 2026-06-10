@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   qdrant:
     image: qdrant/qdrant:latest
@@ -13,7 +11,7 @@ services:
     networks:
       - waif-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+      test: ["CMD-SHELL", "timeout 5 bash -c '</dev/tcp/127.0.0.1/6333'"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -24,6 +22,8 @@ services:
     environment:
       NEO4J_AUTH: neo4j/password
       NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_server_memory_heap_initial__size: 512m
+      NEO4J_server_memory_heap_max__size: 1G
     ports:
       - "7687:7687"  # Bolt port
       - "7474:7474"  # HTTP port (Neo4j Browser)
@@ -31,7 +31,7 @@ services:
       - neo4j_data:/var/lib/neo4j/data
       - neo4j_logs:/var/lib/neo4j/logs
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:7474/db/neo4j/exec"]
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p password 'RETURN 1'"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -44,15 +44,23 @@ services:
       dockerfile: ./backend/Dockerfile
     container_name: waif-backend
     environment:
-      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
-      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
-      TAVILY_API_KEY: ${TAVILY_API_KEY}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
       NEO4J_URI: bolt://neo4j:7687
       NEO4J_USER: neo4j
       NEO4J_PASSWORD: password
       QDRANT_HOST: qdrant
       QDRANT_PORT: 6333
+      MODAL_ENABLED: ${MODAL_ENABLED:-false}
+      WAIF_MODAL_STT_ENABLED: ${WAIF_MODAL_STT_ENABLED:-false}
+      WAIF_SENSES_ENABLED: ${WAIF_SENSES_ENABLED:-false}
+      WAIF_API_KEY: ${WAIF_API_KEY:-}
+      WAIF_ALLOWED_ORIGINS: ${WAIF_ALLOWED_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000}
+      FISHSPEECH_REFERENCE_DIR: /app/backend/static/voice_references
       WS_PORT: 8000
+      ENGINEER_WORKSPACE_ROOT: /workspace
     ports:
       - "8000:8000"
     depends_on:
@@ -61,7 +69,10 @@ services:
       qdrant:
         condition: service_healthy
     volumes:
-      - ./backend:/app
+      - ./backend:/app/backend
+      - ./scripts:/app/scripts:ro
+      - backend_static:/app/backend/static
+      - ./:/workspace:ro
     networks:
       - waif-network
     healthcheck:
@@ -70,11 +81,12 @@ services:
       timeout: 10s
       retries: 3
       start_period: 5s
-qdrant_data:
-  
+
 volumes:
+  qdrant_data:
   neo4j_data:
   neo4j_logs:
+  backend_static:
 
 networks:
   waif-network:

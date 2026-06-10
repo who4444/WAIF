@@ -1,5 +1,6 @@
 from dotenv import load_dotenv
 import os
+from pathlib import Path
 
 load_dotenv()
 
@@ -27,8 +28,13 @@ QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
 QDRANT_PORT = int(os.getenv("QDRANT_PORT", "6333"))
 MODAL_ENABLED = _bool_env("MODAL_ENABLED", True)
 MODAL_TOKEN = os.getenv("MODAL_TOKEN", "")
+WAIF_SENSES_ENABLED = _bool_env("WAIF_SENSES_ENABLED", True)
 GITHUB_TOKEN=  os.getenv("GITHUB_TOKEN", "")    
 WS_PORT = int(os.getenv("WS_PORT", "8000"))
+ENGINEER_WORKSPACE_ROOT = os.getenv(
+    "ENGINEER_WORKSPACE_ROOT",
+    str(Path(__file__).resolve().parents[1]),
+)
 WAIF_API_KEY = os.getenv("WAIF_API_KEY", "")
 WAIF_ALLOWED_ORIGINS = _csv_env(
     "WAIF_ALLOWED_ORIGINS",

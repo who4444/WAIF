@@ -3,10 +3,28 @@ name = "waif"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.14"
 dependencies = [
+    "arxiv>=2.4.1",
     "fastapi[standard]>=0.135.1",
     "fastmcp>=3.1.1",
+    "firecrawl>=4.22.1",
+    "google-api-python-client>=2.0.0",
+    "google-auth-oauthlib>=1.0.0",
+    "graphiti-core>=0.20.0",
+    "langchain-anthropic>=1.4.0",
+    "langchain-core>=1.2.24",
+    "langgraph>=1.1.4",
+    "mem0ai>=0.1.0",
+    "modal>=0.68.0",
     "openai>=2.29.0",
+    "pygithub>=2.0.0",
+    "python-dotenv>=1.0.0",
+    "tavily>=1.1.0",
     "uvicorn>=0.42.0",
+]
+
+[project.optional-dependencies]
+voice = [
+    "realtimestt>=0.3.0",
 ]

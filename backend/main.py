@@ -17,7 +17,7 @@ from core.agents.persona import get_greeting, get_focus_enter, get_focus_exit, S
 from core.llm_client import llm_complete, llm_stream
 from perception.manager import SensesManager
 from memory.memory_manager import memory_manager
-from config import WAIF_ALLOWED_ORIGINS, WAIF_API_KEY
+from config import WAIF_ALLOWED_ORIGINS, WAIF_API_KEY, WAIF_SENSES_ENABLED
 
 # Modal Service Integration
 from core.modal.modal_handler import get_modal_client, tts_gpu_async
@@ -351,12 +351,15 @@ async def startup_event():
 
     loop = asyncio.get_event_loop()
 
-    senses = SensesManager(
-        on_wake=handle_wake,
-        on_transcription=handle_transcription,
-        on_app_change=handle_app_change,
-    )
-    senses.start(loop)
+    if WAIF_SENSES_ENABLED:
+        senses = SensesManager(
+            on_wake=handle_wake,
+            on_transcription=handle_transcription,
+            on_app_change=handle_app_change,
+        )
+        senses.start(loop)
+    else:
+        print("[senses] disabled by WAIF_SENSES_ENABLED=false")
     print("[backend] started")
 
 

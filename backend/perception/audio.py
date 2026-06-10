@@ -50,17 +50,19 @@ class AudioListener:
         self._loop = None
         
         # Modal setup
-        self.modal_transcribe = None
+        self.modal_stt = None
         if MODAL_ENABLED:
             try:
                 import modal
-                # Lookup the remote function (Class.method format)
-                self.modal_transcribe = modal.Cls.from_name(
-                    MODAL_APP_NAME, "WhisperSTT.transcribe"
-                )
-                print("[modal] remote function linked")
+                stt_cls = modal.Cls.from_name(MODAL_APP_NAME, "WhisperSTT")
+                stt_cls.hydrate()
+                self.modal_stt = stt_cls()
+                print("[modal] deployed WhisperSTT service found")
             except Exception as e:
-                print(f"[modal] ERROR: Could not link remote function: {e}")
+                print(
+                    f"[modal] deployed WhisperSTT service not available: {e}. "
+                    "Falling back to local RealtimeSTT transcription."
+                )
 
     def start(self):
         self.running = True
@@ -74,10 +76,8 @@ class AudioListener:
             self.recorder.stop()
 
     def _run(self):
-        # openwakeword >=0.4.0 bundles models in the package and removed
-        # download_models(), but RealtimeSTT 0.3.104 still calls it. Patch it.
-        # Also, openwakeword 0.4.0 AudioFeatures doesn't accept inference_framework
-        # kwarg (added in 0.5.0), but RealtimeSTT passes it through Model -> AudioFeatures.
+        # openWakeWord/Realtimestt compatibility shim: newer openWakeWord
+        # versions changed utility APIs that RealtimeSTT 0.3.x still expects.
         try:
             import openwakeword.utils as owu
             if not hasattr(owu, "download_models"):
@@ -149,14 +149,14 @@ class AudioListener:
                         final_text = local_text
                         
                         # 2. If Modal is enabled, get raw audio and send to GPU
-                        if MODAL_ENABLED and self.modal_transcribe:
+                        if MODAL_ENABLED and self.modal_stt:
                             print("[audio] fetching high-res transcription from Modal GPU...")
                             # get_last_recording() returns a float32 numpy array
                             audio_data = self.recorder.get_last_recording()
                             
                             # Send bytes to Modal (A10G/L4/etc.)
                             # This is a blocking network call inside this thread
-                            final_text = self.modal_transcribe.remote(audio_data.tobytes())
+                            final_text = self.modal_stt.transcribe.remote(audio_data.tobytes())
                             print(f"[audio] modal (medium) result: {final_text}")
 
                         self.listening_for_command = False

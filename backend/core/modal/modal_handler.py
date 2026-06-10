@@ -31,12 +31,16 @@ class ModalClient:
 
         try:
             import modal
-            print(f"[modal] Connecting to remote services in '{MODAL_APP_NAME}'...")
+            print(f"[modal] Looking up deployed services in '{MODAL_APP_NAME}'...")
             
-            # Lookup the Classes (this does not trigger a cold start yet)
+            # from_name only creates local handles. hydrate() performs the actual
+            # Modal lookup without invoking a GPU method.
             stt_cls = modal.Cls.from_name(MODAL_APP_NAME, "WhisperSTT")
             tts_cls = modal.Cls.from_name(MODAL_APP_NAME, "FishSpeechTTS")
             embed_cls = modal.Cls.from_name(MODAL_APP_NAME, "Embeddings")
+            stt_cls.hydrate()
+            tts_cls.hydrate()
+            embed_cls.hydrate()
 
             # Instantiate the service handles
             self._stt_service = stt_cls()
@@ -44,9 +48,13 @@ class ModalClient:
             self._embed_service = embed_cls()
             
             self._initialized = True
-            print("[modal] GPU Services linked and ready.")
+            print("[modal] Deployed GPU services found and handles are ready.")
         except Exception as e:
-            print(f"[modal] Initialization failed: {e}")
+            print(
+                f"[modal] Deployed services not available: {e}. "
+                "Run `modal deploy backend/core/modal/modal_functions.py` "
+                "and confirm the app appears in the Modal dashboard."
+            )
             self.enabled = False
 
     def health_check(self) -> bool:
@@ -145,4 +153,3 @@ async def embedding_gpu_async(text: str) -> Optional[List[float]]:
     """Async Embedding: Returns a 384-dim vector."""
     client = get_modal_client()
     return await asyncio.to_thread(client.get_embedding, text)
-

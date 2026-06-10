@@ -279,7 +279,7 @@ async def execute_plan_node(state: AgentState) -> AgentState:
         print(f"[orchestrator] running {task['agent']} task {task['id']}: {task['objective']}")
         result = await _run_task(task, original_text, task_results)
         task_results.append(result)
-    verification = verify_result(original_text, plan, task_results)
+    verification = await verify_result(original_text, plan, task_results)
     response = await synthesize_final_response(original_text, plan, task_results, verification=verification)
     return { **state, 
             "task_results": task_results, 

@@ -79,7 +79,7 @@ async def deepseek_complete(
         full_messages.extend(messages)
 
         response = await deepseek_client.chat.completions.create(
-            model="deepseek-reasoner",
+            model="deepseek-v4-flash",
             max_tokens=max_tokens,
             messages=full_messages,
         )
@@ -103,7 +103,7 @@ async def deepseek_stream(
         full_messages.extend(messages)
 
         stream = await deepseek_client.chat.completions.create(
-            model="deepseek-reasoner",
+            model="deepseek-v4-flash",
             max_tokens=max_tokens,
             messages=full_messages,
             stream=True,
